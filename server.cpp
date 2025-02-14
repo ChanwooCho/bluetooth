@@ -1,56 +1,76 @@
-#include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
 #include <cstring>
-#include <ctime>
-#include <sys/socket.h>
+#include <cerrno>
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/rfcomm.h>
-#include <unistd.h>
-
-#define PORT 1
+#include <sys/socket.h>
 
 int main() {
-    struct sockaddr_rc localAddr = {0}, remoteAddr = {0};
-    char buffer[256] = {0};
-    int serverSock, clientSock;
-    socklen_t opt = sizeof(remoteAddr);
+    struct sockaddr_rc loc_addr = { 0 }, rem_addr = { 0 };
+    char buf[1024] = { 0 };
+    int s, client, bytes_read;
+    socklen_t opt = sizeof(rem_addr);
 
-    // Create Bluetooth socket
-    serverSock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-    if (serverSock == -1) {
-        std::cerr << "Error creating socket\n";
-        return 1;
+    // Create a Bluetooth socket
+    s = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
+    if (s < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
     }
 
-    // Bind socket to a Bluetooth address
-    localAddr.rc_family = AF_BLUETOOTH;
-    localAddr.rc_bdaddr = *BDADDR_ANY;
-    localAddr.rc_channel = PORT;
-    
-    if (bind(serverSock, (struct sockaddr*)&localAddr, sizeof(localAddr)) == -1) {
-        std::cerr << "Bind failed\n";
-        return 1;
+    // Bind socket to the local Bluetooth adapter and channel 1
+    loc_addr.rc_family = AF_BLUETOOTH;
+    // Using str2ba to set address to any:
+    str2ba("00:00:00:00:00:00", &loc_addr.rc_bdaddr);
+    loc_addr.rc_channel = (uint8_t) 1;
+    if (bind(s, (struct sockaddr *)&loc_addr, sizeof(loc_addr)) < 0) {
+        perror("bind");
+        exit(EXIT_FAILURE);
     }
 
-    // Listen for connection
-    listen(serverSock, 1);
-    std::cout << "Waiting for connection...\n";
-
-    // Accept a connection
-    clientSock = accept(serverSock, (struct sockaddr*)&remoteAddr, &opt);
-    if (clientSock == -1) {
-        std::cerr << "Connection failed\n";
-        return 1;
+    // Listen for incoming connections
+    if (listen(s, 1) < 0) {
+        perror("listen");
+        exit(EXIT_FAILURE);
     }
-    std::cout << "Client connected!\n";
 
+    printf("Server: Waiting for connection...\n");
+
+    // Accept one connection
+    client = accept(s, (struct sockaddr *)&rem_addr, &opt);
+    if (client < 0) {
+        perror("accept");
+        exit(EXIT_FAILURE);
+    }
+
+    char client_addr[18];
+    ba2str(&rem_addr.rc_bdaddr, client_addr);
+    printf("Server: Accepted connection from %s\n", client_addr);
+
+    // Echo loop: read data and immediately send it back
     while (true) {
-        int bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
-        if (bytesReceived > 0) {
-            send(clientSock, buffer, bytesReceived, 0); // Echo back
+        bytes_read = read(client, buf, sizeof(buf));
+        if (bytes_read > 0) {
+            printf("Server: Received [%s]\n", buf);
+            if (write(client, buf, bytes_read) <= 0) {
+                perror("write");
+                break;
+            }
+        } else {
+            if (bytes_read == 0) {
+                printf("Server: Client disconnected\n");
+            } else {
+                perror("read");
+            }
+            break;
         }
+        // Clear the buffer for the next message
+        memset(buf, 0, sizeof(buf));
     }
 
-    close(clientSock);
-    close(serverSock);
+    close(client);
+    close(s);
     return 0;
 }
