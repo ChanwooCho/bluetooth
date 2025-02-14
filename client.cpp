@@ -22,7 +22,7 @@ int main() {
 
     // Set up server address
     serverAddr.rc_family = AF_BLUETOOTH;
-    str2ba("XX:XX:XX:XX:XX:XX", &serverAddr.rc_bdaddr); // Replace with server Bluetooth MAC
+    str2ba("D0:04:B0:2B:93:28", &serverAddr.rc_bdaddr); // Replace with server Bluetooth MAC
     serverAddr.rc_channel = PORT;
 
     // Connect to server
