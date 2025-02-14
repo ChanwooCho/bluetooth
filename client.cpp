@@ -1,55 +1,71 @@
-#include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
 #include <cstring>
-#include <ctime>
+#include <cerrno>
 #include <sys/socket.h>
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/rfcomm.h>
-#include <unistd.h>
+#include <chrono>
+#include <iostream>
 
-#define PORT 1
+using namespace std;
 
 int main() {
-    struct sockaddr_rc serverAddr = {0};
-    char buffer[256] = {0};
-    int clientSock;
+    struct sockaddr_rc addr = { 0 };
+    int s, status;
+    // Replace the following with the server's Bluetooth address
+    char dest[18] = "D0:04:B0:2B:93:28"; 
 
-    // Create Bluetooth socket
-    clientSock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-    if (clientSock == -1) {
-        std::cerr << "Error creating socket\n";
-        return 1;
+    // Create a Bluetooth socket
+    s = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
+    if (s < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
     }
 
-    // Set up server address
-    serverAddr.rc_family = AF_BLUETOOTH;
-    str2ba("D0:04:B0:2B:93:28", &serverAddr.rc_bdaddr); // Replace with server Bluetooth MAC
-    serverAddr.rc_channel = PORT;
+    // Set connection parameters (server's address and channel)
+    addr.rc_family = AF_BLUETOOTH;
+    str2ba(dest, &addr.rc_bdaddr);
+    addr.rc_channel = (uint8_t) 1;
 
     // Connect to server
-    if (connect(clientSock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
-        std::cerr << "Connection failed\n";
-        return 1;
+    status = connect(s, (struct sockaddr *)&addr, sizeof(addr));
+    if (status < 0) {
+        perror("connect");
+        exit(EXIT_FAILURE);
     }
-    std::cout << "Connected to server\n";
+    cout << "Client: Connected to server " << dest << endl;
 
-    while (true) {
-        // Get current timestamp
-        struct timespec start, end;
-        clock_gettime(CLOCK_MONOTONIC, &start);
+    const int iterations = 10;
+    for (int i = 0; i < iterations; i++) {
+        const char* msg = "ping";
+        char buf[1024] = { 0 };
 
-        snprintf(buffer, sizeof(buffer), "%ld.%09ld", start.tv_sec, start.tv_nsec);
-        send(clientSock, buffer, strlen(buffer), 0);
+        // Record the time before sending the message
+        auto start = chrono::steady_clock::now();
 
-        int bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
-        if (bytesReceived > 0) {
-            clock_gettime(CLOCK_MONOTONIC, &end);
-            double rtt = (end.tv_sec - start.tv_sec) * 1e3 + (end.tv_nsec - start.tv_nsec) / 1e6;
-            std::cout << "Round-trip time: " << rtt << " ms\n";
+        // Send the ping message
+        if (write(s, msg, strlen(msg)) < 0) {
+            perror("write");
+            break;
         }
 
-        sleep(1); // Send every second
+        // Wait for the echoed reply from the server
+        if (read(s, buf, sizeof(buf)) < 0) {
+            perror("read");
+            break;
+        }
+
+        // Record the time after receiving the reply
+        auto end = chrono::steady_clock::now();
+        auto elapsed = chrono::duration_cast<chrono::microseconds>(end - start).count();
+
+        cout << "Client: Iteration " << (i + 1)
+             << " - Round Trip Time = " << elapsed << " microseconds" << endl;
+        sleep(1); // Pause for a second between pings
     }
 
-    close(clientSock);
+    close(s);
     return 0;
 }
